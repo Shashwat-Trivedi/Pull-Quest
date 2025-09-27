@@ -148,68 +148,82 @@ export class ContributorController {
         return;
       }
 
-      // For now, return mock data. In a real implementation, you would:
-      // 1. Analyze user's skills from their repositories
-      // 2. Search for issues in popular repositories matching their skills
-      // 3. Filter by difficulty and bounty information
+      console.log("🎯 Fetching suggested issues from bounty database...");
 
-      const mockIssues = [
-        {
-          id: 1,
-          number: 123,
-          title: "Add dark mode support to dashboard",
-          body: "We need to implement a dark mode toggle for better user experience...",
+      // Import the required models
+      const MaintainerIssue = require("../model/MaintainerIssues").default;
+
+      // Fetch bounty issues from the database (open issues with bounties/stakes)
+      const bountyIssues = await MaintainerIssue.find({
+        state: "open", // Only open issues
+        $or: [
+          { 'labels.name': { $regex: /^bounty-\d+ℏ?$/i } },
+          { 'labels.name': { $regex: /^stake-\d+ℏ?$/i } },
+          { bounty: { $exists: true, $ne: null, $gt: 0 } },
+          { stakingRequired: { $gt: 0 } }
+        ]
+      })
+      .sort({ createdAt: -1 }) // Most recent first
+      .limit(20) // Limit to 20 suggestions
+      .lean();
+
+      console.log(`✅ Found ${bountyIssues.length} bounty issues in database`);
+
+      // Transform the data to match frontend expectations
+      const transformedIssues = bountyIssues.map((issue: any) => {
+        // Extract bounty and stake amounts from labels
+        const bountyAmount = this.extractAmountFromLabels(issue.labels, 'bounty') || issue.bounty || 0;
+        const stakeAmount = this.extractAmountFromLabels(issue.labels, 'stake') || issue.stakingRequired || 0;
+        
+        // Determine difficulty based on labels or default to beginner
+        let difficulty = "beginner";
+        if (issue.difficulty) {
+          difficulty = issue.difficulty;
+        } else if (issue.labels) {
+          const difficultyLabel = issue.labels.find((label: any) => 
+            ['easy', 'medium', 'hard', 'beginner', 'intermediate', 'advanced'].includes(label.name.toLowerCase())
+          );
+          if (difficultyLabel) {
+            const labelName = difficultyLabel.name.toLowerCase();
+            if (['easy', 'beginner'].includes(labelName)) difficulty = "beginner";
+            else if (['medium', 'intermediate'].includes(labelName)) difficulty = "intermediate";
+            else if (['hard', 'advanced', 'expert'].includes(labelName)) difficulty = "advanced";
+          }
+        }
+
+        return {
+          id: issue._id?.toString() || issue.id,
+          number: issue.number,
+          title: issue.title,
+          body: issue.body || "No description provided.",
           repository: {
-            name: "awesome-project",
-            fullName: "owner/awesome-project",
-            htmlUrl: "https://github.com/owner/awesome-project",
-            stargazersCount: 1500,
-            language: "TypeScript",
+            name: issue.repository?.name || "Unknown",
+            fullName: issue.repository?.fullName || "unknown/unknown",
+            htmlUrl: issue.repository?.htmlUrl || "#",
+            stargazersCount: issue.repository?.stargazersCount || 0,
+            language: issue.repository?.language || "Unknown",
           },
-          labels: [
-            { name: "enhancement", color: "84cc16" },
-            { name: "good first issue", color: "22c55e" },
-          ],
-          difficulty: "beginner" as const,
-          bounty: 100,
-          xpReward: 50,
-          stakingRequired: 25,
-          htmlUrl: "https://github.com/owner/awesome-project/issues/123",
-          createdAt: new Date().toISOString(),
-        },
-        {
-          id: 2,
-          number: 456,
-          title: "Implement user authentication with JWT",
-          body: "Need to add secure user authentication using JWT tokens...",
-          repository: {
-            name: "backend-api",
-            fullName: "company/backend-api",
-            htmlUrl: "https://github.com/company/backend-api",
-            stargazersCount: 800,
-            language: "JavaScript",
-          },
-          labels: [
-            { name: "security", color: "ef4444" },
-            { name: "backend", color: "3b82f6" },
-          ],
-          difficulty: "intermediate" as const,
-          bounty: 250,
-          xpReward: 150,
-          stakingRequired: 50,
-          htmlUrl: "https://github.com/company/backend-api/issues/456",
-          createdAt: new Date().toISOString(),
-        },
-      ];
+          labels: issue.labels?.map((label: any) => ({
+            name: label.name,
+            color: label.color,
+          })) || [],
+          difficulty: difficulty as "beginner" | "intermediate" | "advanced",
+          bounty: bountyAmount,
+          xpReward: issue.xpReward || Math.floor(bountyAmount * 0.5), // Calculate XP as 50% of bounty
+          stakingRequired: stakeAmount,
+          htmlUrl: issue.htmlUrl,
+          createdAt: new Date(issue.createdAt).toISOString(),
+        };
+      });
 
       res.status(200).json({
         success: true,
         data: {
-          issues: mockIssues,
+          issues: transformedIssues,
         }
       });
     } catch (error: any) {
-      console.error("Error fetching suggested issues:", error);
+      console.error("❌ Error fetching suggested issues:", error);
       res.status(500).json({
         success: false,
         message: "Failed to fetch suggested issues",
@@ -271,6 +285,25 @@ export class ContributorController {
         error: error.message,
       });
     }
+  }
+
+  /**
+   * Helper method to extract bounty/stake amounts from labels
+   */
+  private extractAmountFromLabels(labels: any[], type: 'bounty' | 'stake'): number {
+    if (!labels || !Array.isArray(labels)) return 0;
+    
+    const regex = type === 'bounty' 
+      ? /^bounty-(\d+)ℏ?$/i 
+      : /^stake-(\d+)ℏ?$/i;
+    
+    for (const label of labels) {
+      const match = label.name?.match(regex);
+      if (match) {
+        return parseInt(match[1], 10);
+      }
+    }
+    return 0;
   }
 
   /**

@@ -9,6 +9,7 @@ import { handlePRWebhook } from "./webhooks/githubWebhooks";
 import passport from "passport";
 import "./auth/github";
 // import contributorRoutes from "./routes/contributorRoutes";
+import contributorRoutes from "./routes/contributorRoutes";
 import maintainerRoutes from "./routes/MaintainerRoutes";
 import { githubApiRateLimit } from "./middleware/rateLimitMiddleware";
 import User from "./model/User";
@@ -61,7 +62,7 @@ app.get("/health", (req: Request, res: Response): void => {
 app.use("/", authRoutes);
 // GitHub OAuth (without sessions)
 app.get("/auth/github", passport.authenticate("github", { 
-  scope: ["user:email"],
+  scope: ["user:email", "repo", "read:user", "read:org"],
   session: false 
 }));
 
@@ -99,7 +100,8 @@ app.get(
         role: dbUser.role || "contributor",  // make sure `role` exists on the user doc
         email: dbUser.email,
         githubUsername,
-        token: jwt,
+        token: jwt, // JWT for authentication
+        githubAccessToken: accessToken, // GitHub access token for API calls
       };
 
       const encoded = encodeURIComponent(JSON.stringify(frontendUser));
@@ -119,7 +121,7 @@ app.get(
 
 app.use("/api", githubApiRateLimit);
 app.use('/api/comment', commentRoute);
-// app.use("/api/contributor", contributorRoutes);
+app.use("/api/contributor", contributorRoutes);
 app.use("/api/maintainer", maintainerRoutes);
 app.use("/api/LLM", LLMRoutes);
 

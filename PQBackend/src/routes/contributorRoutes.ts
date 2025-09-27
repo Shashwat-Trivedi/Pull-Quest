@@ -1,47 +1,44 @@
-// import { Router } from "express";
-// import { ContributorController } from "../controllers/contributorController";
-// import {
-//   repositoryAnalysisRateLimit,
-//   issueFetchRateLimit,
-// } from "../middleware/rateLimitMiddleware";
-// import { StakeController } from "../controllers/stakeController";
+import { Router } from "express";
+import { ContributorController } from "../controllers/contributorController";
+import {
+  repositoryAnalysisRateLimit,
+  issueFetchRateLimit,
+} from "../middleware/rateLimitMiddleware";
+import { StakeController } from "../controllers/stakeController";
 
-// const router = Router();
+const router = Router();
 
-// const contributorController = new ContributorController();
+const contributorController = new ContributorController();
+const stakeController = new StakeController();
 
-// const stakeController = new StakeController();
+// Test route to verify API is working
+router.get("/test", (req, res) => {
+  res.json({ success: true, message: "Contributor API is working!" });
+});
 
-// router.post(
-//   "/analyze-repositories",
-//   repositoryAnalysisRateLimit,
-//   contributorController.analyzeUserRepositories
-// );
+// Profile routes
+router.post("/profile", (req, res) => contributorController.getContributorProfile(req, res));
 
-// router.post(
-//   "/suggested-issues",
-//   issueFetchRateLimit,
-//   contributorController.getSuggestedIssues
-// );
+// Repository analysis routes
+router.post(
+  "/analyze-repositories",
+  repositoryAnalysisRateLimit,
+  (req, res) => contributorController.analyzeUserRepositories(req, res)
+);
 
-// router.post(
-//   "/analyze-repositories",
-//   repositoryAnalysisRateLimit,
-//   contributorController.analyzeUserRepositories
-// );
+// Issue routes
+router.post(
+  "/suggested-issues",
+  issueFetchRateLimit,
+  (req, res) => contributorController.getSuggestedIssues(req, res)
+);
 
-// router.post(
-//   "/suggested-issues",
-//   issueFetchRateLimit,
-//   contributorController.getSuggestedIssues
-// );
+router.get("/issue-details/:issueId", (req, res) => contributorController.getIssueDetails(req, res));
 
-// router.get("/issue-details/:issueId", contributorController.getIssueDetails);
+// Stake routes
+router.post("/stakes", stakeController.createStake);
+router.patch("/stakes/:stakesId", stakeController.updateStakeStatus);
+router.get("/stakes", stakeController.getUserStakes);
+router.post("/prepare-stakes", (req, res) => contributorController.prepareStake(req, res));
 
-// router.post("/stakes", stakeController.createStake);
-// router.patch("/stakes/:stakesId", stakeController.updateStakeStatus);
-// router.get("/:userId/stakes", stakeController.getUserStakes);
-// router.get("/profile/:userId", contributorController.getContributorProfile);
-// router.post("prepare-stakes", contributorController.prepareStake);
-
-// export default router;
+export default router;

@@ -42,7 +42,7 @@ export const UserProvider = ({ children }: { children: ReactNode }) => {
       localStorage.setItem("github_username", u.githubUsername || "");
       localStorage.setItem("pq_email", u.email || "");
       localStorage.setItem("pq_role", u.role);
-      localStorage.setItem("github_access_token", u.accessToken);
+      // Note: github_access_token should be set separately during OAuth
     } else {
       Cookie.remove("pq_user");
       Cookie.remove("pq_token");

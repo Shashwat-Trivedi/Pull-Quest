@@ -82,7 +82,7 @@ useEffect(() => {
   
       // Store all user data in localStorage
       localStorage.setItem("token", oauthUser.token);
-      localStorage.setItem("github_access_token", oauthUser.token);
+      localStorage.setItem("github_access_token", oauthUser.githubAccessToken);
       localStorage.setItem("github_username", oauthUser.githubUsername);
   
       setUser({

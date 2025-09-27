@@ -108,35 +108,54 @@ export default function ContributorDashboard() {
   }, [user]);
 
   const getGitHubData = () => {
-    const accessToken = localStorage.getItem('github_access_token');
-    const githubUsername = localStorage.getItem('github_username');
+    // Try multiple possible locations for the access token
+    const accessToken = localStorage.getItem('github_access_token') || 
+                       localStorage.getItem('token') || 
+                       user?.accessToken;
+    const githubUsername = localStorage.getItem('github_username') || 
+                          user?.githubUsername;
+    
+    console.log("🔍 Debug - Access token:", accessToken ? "Found" : "Not found");
+    console.log("🔍 Debug - GitHub username:", githubUsername);
+    
     return { accessToken, githubUsername };
   };
 
   const fetchUserProfile = async () => {
     try {
+      console.log("🚀 Starting fetchUserProfile...");
       const { accessToken } = getGitHubData();
       
       if (!accessToken) {
+        console.log("❌ No access token found");
         toast.error("GitHub authentication required");
         return;
       }
 
+      console.log("📡 Making API call to:", `${API_BASE}/api/contributor/profile`);
+      
       const response = await axios.post(
         `${API_BASE}/api/contributor/profile`,
         { accessToken }
       );
       
+      console.log("✅ API response:", response.data);
+      
       if (response.data.success) {
         const profile = response.data.data.profile;
         const stats = response.data.data.stats;
+        console.log("👤 Profile data:", profile);
+        console.log("📊 Stats data:", stats);
         setUserProfile(profile);
         setUserStats(stats);
       }
     } catch (error: any) {
-      console.error("Error fetching user profile:", error);
+      console.error("❌ Error fetching user profile:", error);
+      console.error("❌ Error response:", error.response?.data);
       if (error.response?.status === 401) {
         toast.error("Invalid GitHub token. Please re-authenticate.");
+      } else {
+        toast.error("Failed to fetch profile data. Please try again.");
       }
     }
   };

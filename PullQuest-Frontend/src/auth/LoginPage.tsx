@@ -80,8 +80,10 @@ useEffect(() => {
       const oauthUser = JSON.parse(decodeURIComponent(wp));
       console.log("👤 OAuth payload:", oauthUser);
   
-      // ← store JWT here too:
+      // Store all user data in localStorage
       localStorage.setItem("token", oauthUser.token);
+      localStorage.setItem("github_access_token", oauthUser.token);
+      localStorage.setItem("github_username", oauthUser.githubUsername);
   
       setUser({
         id: oauthUser.id,

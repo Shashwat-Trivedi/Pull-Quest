@@ -255,7 +255,7 @@ export default function ContributorDashboard() {
     );
   }
 
-  if (!user) {
+  if (!user && !userLoading) {
     navigate("/login");
     return null;
   }

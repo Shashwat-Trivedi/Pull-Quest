@@ -36,16 +36,41 @@ export const UserProvider = ({ children }: { children: ReactNode }) => {
     if (u) {
       Cookie.set("pq_user", JSON.stringify(u), { expires: 30 });
       Cookie.set("pq_token", u.accessToken, { expires: 30 });
+      // Also store in localStorage for persistence
+      localStorage.setItem("token", u.accessToken);
+      localStorage.setItem("pq_user", JSON.stringify(u));
+      localStorage.setItem("github_username", u.githubUsername || "");
+      localStorage.setItem("pq_email", u.email || "");
+      localStorage.setItem("pq_role", u.role);
+      localStorage.setItem("github_access_token", u.accessToken);
     } else {
       Cookie.remove("pq_user");
       Cookie.remove("pq_token");
+      // Also clear localStorage
+      localStorage.removeItem("token");
+      localStorage.removeItem("pq_user");
+      localStorage.removeItem("github_username");
+      localStorage.removeItem("pq_email");
+      localStorage.removeItem("pq_role");
+      localStorage.removeItem("github_access_token");
     }
   };
 
   useEffect(() => {
     const bootstrap = async () => {
-      const storedUser = Cookie.get("pq_user");
-      const token = Cookie.get("pq_token");
+      // Try cookies first
+      let storedUser = Cookie.get("pq_user");
+      let token = Cookie.get("pq_token");
+
+      // If not in cookies, try localStorage
+      if (!storedUser || !token) {
+        const lsUser = localStorage.getItem("pq_user");
+        const lsToken = localStorage.getItem("token");
+        if (lsUser && lsToken) {
+          storedUser = lsUser;
+          token = lsToken;
+        }
+      }
 
       if (storedUser && token) {
         try {
@@ -62,7 +87,7 @@ export const UserProvider = ({ children }: { children: ReactNode }) => {
             const fresh = await res.json();
             setUser(fresh);
           } else {
-            setUser(JSON.parse(storedUser)); // fall back to cookie copy
+            setUser(JSON.parse(storedUser)); // fall back to stored copy
           }
         } catch (err) {
           console.error("User refresh failed:", err);

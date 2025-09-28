@@ -19,6 +19,12 @@ export interface IUser extends Document, IUserMethods {
   createdAt: Date;
   upadtedAt: Date;
   githubUsername?: string;
+  
+  // Wallet-related fields
+  walletAddress?: string;
+  publicAddress?: string;        // Support existing database field
+  walletType?: string;
+  isWalletVerified?: boolean;
 }
 
 interface IUserMethods {
@@ -40,14 +46,12 @@ const userSchema = new Schema<IUser & IUserMethods>(
       type: String,
       required: true,
       enum: ["contributor", "maintainer", "company"],
-      default: "contributor", // Add default role
+      default: "contributor",
     },
     githubUsername: { type: String, sparse: true, trim: true },
     
-    /* ─── NEW FIELDS ──────────────────────────────── */
     accessToken: { type: String },
     githubInfo: { type: String },
-    /* ─────────────────────────────────────────────── */
     
     profile: {
       name: { type: String, trim: true },
@@ -78,14 +82,51 @@ const userSchema = new Schema<IUser & IUserMethods>(
     monthlyCoinsLastRefill: { type: Date, default: Date.now },
     isActive: { type: Boolean, default: true },
     lastLogin: { type: Date, default: Date.now },
+    
+    // Wallet-related schema fields
+    walletAddress: {
+      type: String,
+      trim: true,
+      sparse: true,
+      validate: {
+        validator: function(v: string) {
+          // Allow Ethereum addresses or custom formats
+          return !v || /^0x[a-fA-F0-9]{40}$/.test(v) || v.length > 10;
+        },
+        message: 'Invalid wallet address format.'
+      }
+    },
+    publicAddress: {
+      type: String,
+      trim: true,
+      sparse: true,
+      validate: {
+        validator: function(v: string) {
+          // Allow any string format for publicAddress
+          return !v || v.length > 5;
+        },
+        message: 'Invalid public address format.'
+      }
+    },
+    walletType: {
+      type: String,
+      enum: ['MetaMask', 'WalletConnect', 'Coinbase', 'Trust Wallet', 'Other'],
+      default: 'MetaMask'
+    },
+    isWalletVerified: {
+      type: Boolean,
+      default: false
+    }
   },
   { timestamps: true }
 );
 
-// userSchema.index({ email: 1 });
-// userSchema.index({ githubUsername: 1 });
+// Indexes
 userSchema.index({ role: 1 });
 userSchema.index({ xp: -1 });
+userSchema.index({ walletAddress: 1 }, { sparse: true });
+userSchema.index({ publicAddress: 1 }, { sparse: true });
+userSchema.index({ githubUsername: 1 }, { sparse: true });
 
 userSchema.methods.calculateRank = function (): string {
   const xp = this.xp || 0;
@@ -101,6 +142,14 @@ userSchema.pre("save", function (next) {
   if (this.role === "contributor") {
     this.rank = this.calculateRank();
   }
+  
+  // Auto-sync wallet addresses
+  if (this.publicAddress && !this.walletAddress) {
+    this.walletAddress = this.publicAddress;
+  } else if (this.walletAddress && !this.publicAddress) {
+    this.publicAddress = this.walletAddress;
+  }
+  
   next();
 });
 

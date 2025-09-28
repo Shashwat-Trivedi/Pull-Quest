@@ -3,6 +3,7 @@ import cors from "cors";
 import dotenv from "dotenv";
 import mongoose from "mongoose";
 import authRoutes from "./routes/auth";
+import selfProtocolRoutes from "./routes/selfProtocolRoutes";
 import { verifyToken } from "./middleware/verifyToken";
 import helmet from "helmet";
 import { handlePRWebhook } from "./webhooks/githubWebhooks";
@@ -60,6 +61,7 @@ app.get("/health", (req: Request, res: Response): void => {
 });
 
 app.use("/", authRoutes);
+app.use("/api/self", selfProtocolRoutes);
 // GitHub OAuth (without sessions)
 app.get("/auth/github", passport.authenticate("github", { 
   scope: ["user:email", "repo", "read:user", "read:org"],

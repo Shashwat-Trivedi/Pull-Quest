@@ -19,6 +19,14 @@ export interface IUser extends Document, IUserMethods {
   createdAt: Date;
   upadtedAt: Date;
   githubUsername?: string;
+  
+  // NEW: Self Protocol integration fields
+  selfProtocolDID?: string;        // Decentralized Identifier
+  aadhaarVerified?: boolean;       // Aadhaar verification status
+  walletAddress?: string;          // Primary wallet address
+  linkedWallets?: any[];           // Array of linked wallets
+  trustScore?: number;             // Trust/reputation score
+  nullifiers?: string[];           // For sybil resistance
 }
 
 interface IUserMethods {
@@ -78,6 +86,14 @@ const userSchema = new Schema<IUser & IUserMethods>(
     monthlyCoinsLastRefill: { type: Date, default: Date.now },
     isActive: { type: Boolean, default: true },
     lastLogin: { type: Date, default: Date.now },
+    
+    // NEW: Self Protocol fields
+    selfProtocolDID: { type: String, sparse: true, trim: true },
+    aadhaarVerified: { type: Boolean, default: false },
+    walletAddress: { type: String, sparse: true, trim: true },
+    linkedWallets: [{ type: Schema.Types.Mixed }],
+    trustScore: { type: Number, default: 0, min: 0, max: 100 },
+    nullifiers: [{ type: String }]
   },
   { timestamps: true }
 );

@@ -11,7 +11,6 @@ import { Toaster } from "./components/ui/sonner";
 import Website from "./pages/Website";
 import LoginPage from "./auth/LoginPage";
 import SignUp    from "./auth/SignUp";
-import ConnectWallet from "./pages/ConnectWallet";
 
 import ContributorDashboard  from "./pages/ContributorDashboard";
 import ContributorProfile    from "./components/contributor/ContributorProfile";
@@ -33,6 +32,7 @@ import ReviewPrStep  from "./Flows/RepoIssuesStep";
 import CompanyDashboard from "./pages/CompanyDashborad";
 import NewIssuePage from "./Flows/NewIssueForm";
 import BountyIssuesMaintainer from "./Flows/BountyIssuesMaintainer";
+import EnhancedConnectWallet from "./pages/EnhancedConnectWallet";
 
 export default function App() {
   return (
@@ -43,8 +43,8 @@ export default function App() {
           <Route path="/"    element={<Website />} />
           <Route path="/login"   element={<LoginPage />} />
           <Route path="/signUp"  element={<SignUp    />} />
-          <Route path="/connect-wallet" element={<ConnectWallet />} />
-
+          <Route path="/connect-wallet" element={<EnhancedConnectWallet />} />
+          <Route path="/enhanced-connect-wallet" element={<EnhancedConnectWallet />} />
           {/* contributor */}
           <Route path="/contributor/*" element={
             <PrivateRoute allowedRoles={["contributor"]}>

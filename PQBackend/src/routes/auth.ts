@@ -2,6 +2,7 @@ import { Router, Request, Response } from "express";
 import bcrypt from "bcrypt";
 import jwt from "jsonwebtoken";
 import User from "../model/User";
+import { verifyToken } from "../middleware/verifyToken";
 
 const router = Router();
 
@@ -102,6 +103,46 @@ router.post("/login", async (req: Request, res: Response): Promise<void> => {
   } catch (err) {
     console.error("Login error:", err);
     res.status(500).json({ error: "Login failed" });
+  }
+});
+
+// GET /api/user - Get current user info (for UserProvider)
+router.get("/api/user", verifyToken, async (req: Request, res: Response): Promise<void> => {
+  try {
+    // The verifyToken middleware adds user info to req.user
+    const userId = (req as any).user?.id;
+    
+    if (!userId) {
+      res.status(401).json({ error: "Unauthorized" });
+      return;
+    }
+
+    const user = await User.findById(userId).select('-password'); // Exclude password
+    
+    if (!user) {
+      res.status(404).json({ error: "User not found" });
+      return;
+    }
+
+    res.json({
+      id: user._id,
+      email: user.email,
+      role: user.role,
+      githubUsername: user.githubUsername,
+      profile: user.profile,
+      coins: user.coins,
+      xp: user.xp,
+      rank: user.rank,
+      isActive: user.isActive,
+      selfProtocolDID: user.selfProtocolDID,
+      aadhaarVerified: user.aadhaarVerified,
+      walletAddress: user.walletAddress,
+      trustScore: user.trustScore
+    });
+
+  } catch (err) {
+    console.error("Get user error:", err);
+    res.status(500).json({ error: "Failed to get user info" });
   }
 });
 

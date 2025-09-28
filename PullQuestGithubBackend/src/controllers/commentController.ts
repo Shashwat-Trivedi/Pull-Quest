@@ -1,12 +1,12 @@
 // src/controllers/commentController.ts
 import { Request, Response, RequestHandler } from "express";
-import { postIssueComment, postPullRequestReviewComment, postPRFormComment } from "../utils/githubComment";
+import { postIssueComment, postPullRequestReviewComment, postPRFormComment , postPullRequestComment} from "../utils/githubComment";
 import User from "../model/User";
 import { fetchCompleteIssueData } from "../utils/githubComment";
 import { ingestStakedIssue } from "../ingester/issueIngester";
 import { fetchPRDetails } from "../utils/githubComment";
 import { ingestMergedPR } from "../ingester/mergedPRIngester";
-
+import { PRTracking } from "../model/PRTracking";
 
 export const commentOnIssue: RequestHandler = async (req, res) => {
   console.log("📥 Incoming payload:", JSON.stringify(req.body, null, 2));
@@ -69,11 +69,26 @@ async function fetchIssueDetails(
   return (await resp.json()) as any;
 }
 
+// Add this interface for PR tracking
+interface IPRData {
+  owner: string;
+  repo: string;
+  prNumber: number;
+  author: string;
+  description: string;
+  labels: string[];
+  stakeAmount: number;
+  linkedIssue?: number;
+  walletCheckScheduled: boolean;
+  createdAt: Date;
+  status: 'pending' | 'wallet_verified' | 'wallet_pending' | 'completed';
+}
+
+
 export const commentOnPrs: RequestHandler = async (req, res) => {
   console.log("📥 Incoming PR payload:", JSON.stringify(req.body, null, 2));
   
-  // <<< ADDED: Define your website's URL here for easy configuration
-  const websiteUrl = "https://your-dapp-url.com/stake";
+  const websiteUrl = "https://pull-quest-frontend-seven.vercel.app/connect-wallet";
 
   const { owner, repo, prNumber, author, description = "", labels = [] } = req.body as {
     owner?: string;
@@ -85,9 +100,7 @@ export const commentOnPrs: RequestHandler = async (req, res) => {
   };
 
   if (!owner || !repo || !prNumber || !author) {
-    res
-      .status(400)
-      .json({ error: "owner, repo, prNumber and author are required" });
+    res.status(400).json({ error: "owner, repo, prNumber and author are required" });
     return;
   }
 
@@ -101,7 +114,12 @@ export const commentOnPrs: RequestHandler = async (req, res) => {
     
     if (user) {
       console.log(`✅ Found contributor: ${author}`);
-      // ... (console logs for user details)
+      console.log(`💰 User coins: ${user.coins}, XP: ${user.xp}, Rank: ${user.rank}`);
+      // Check both walletAddress and publicAddress fields
+      const hasWallet = (user.walletAddress && user.walletAddress.trim() !== "") || 
+                       (user.publicAddress && user.publicAddress.trim() !== "");
+      console.log(`🔗 Wallet connected: ${hasWallet ? 'Yes' : 'No'}`);
+      console.log(`📍 Wallet fields - walletAddress: ${user.walletAddress || 'null'}, publicAddress: ${user.publicAddress || 'null'}`);
     } else {
       console.log(`❌ Contributor not found: ${author} with role 'contributor'`);
     }
@@ -130,38 +148,63 @@ export const commentOnPrs: RequestHandler = async (req, res) => {
 
       if (stakeLabel) {
         stakeAmt = Number(stakeLabel.match(/(\d+)/)![1]);
+        console.log(`🎯 Found stake amount from linked issue: ${stakeAmt} coins`);
       }
     } catch (e) {
-      console.error("⚠️  Could not fetch linked issue:", e);
+      console.error("⚠️ Could not fetch linked issue:", e);
     }
   }
 
-  /* ── 3. Check user and construct comment ──────────────────────── */
+  /* ── 3. Store PR data in database ──────────────────────────────── */
+  let prTrackingRecord = null;
+  try {
+    // Check wallet status for both fields
+    const userWalletStatus = user ? 
+      ((user.walletAddress && user.walletAddress.trim() !== "") || 
+       (user.publicAddress && user.publicAddress.trim() !== "")) : false;
+
+    prTrackingRecord = await PRTracking.findOneAndUpdate(
+      { owner, repo, prNumber },
+      {
+        owner,
+        repo,
+        prNumber,
+        author,
+        description,
+        labels,
+        stakeAmount: stakeAmt,
+        linkedIssue: linkedIssueNumber,
+        walletCheckScheduled: true,
+        status: user ? (userWalletStatus ? 'wallet_verified' : 'wallet_pending') : 'pending'
+      },
+      { upsert: true, new: true }
+    );
+    
+    console.log(`📊 PR tracking record saved: ${prTrackingRecord._id}`);
+  } catch (error) {
+    console.error("❌ Failed to save PR tracking record:", error);
+  }
+
+  /* ── 4. Check user and construct comment ──────────────────────── */
   let commentBody: string;
   
-  // 🔥 NEW LOGIC: Always check if user exists first
   if (!user) {
-    // User doesn't exist - guide them to sign up regardless of stake
     const signupUrl = stakeAmt > 0 && linkedIssueNumber 
       ? `${websiteUrl}?owner=${owner}&repo=${repo}&issue=${linkedIssueNumber}`
       : websiteUrl;
     
     if (stakeAmt > 0) {
-      // User doesn't exist AND this is a staked PR
       commentBody = `👋 Welcome, @${author}! It looks like you're new here. To contribute to a staked issue, you first need to create an account.
 
 ### Next Steps:
-1. **[Click here to sign up and stake on Issue #${linkedIssueNumber}](${signupUrl})**
-2. Connect your wallet to receive your starting coins.
-3. Complete the stake on our platform.
+1. **[Click here to sign up and stake on Issue ${linkedIssueNumber}](${signupUrl})**
+2. Connect your wallet to receive your starting coins
+3. Complete the stake on our platform
 
 Once you've staked, your pull request can be reviewed.
 
----
-- **Required Stake:** ${stakeAmt} coins
-- **Linked Issue:** ${issueRef}`;
+**Required stake:** ${stakeAmt} coins 🪙`;
     } else {
-      // User doesn't exist AND this is a regular PR
       commentBody = `👋 Welcome, @${author}! It looks like you're new to our platform.
 
 ### Get Started:
@@ -174,11 +217,9 @@ This appears to be a regular contribution (no stake required). Once you have an 
 Thanks for your interest in contributing! 🚀`;
     }
   } else if (stakeAmt > 0) {
-    // User exists AND this is a staked PR
     const userCoins = user.coins;
     
     if (userCoins >= stakeAmt) {
-      // User exists and has enough coins (SUCCESS CASE)
       console.log(`✅ ${author} has enough coins (${userCoins}) for stake (${stakeAmt})`);
       
       user.coins -= stakeAmt;
@@ -190,29 +231,29 @@ Thanks for your interest in contributing! 🚀`;
       console.log(`🎉 Awarded ${xpReward} XP. New XP: ${user.xp}`);
 
       if (linkedIssueNumber) {
-          // ... (your existing issue ingestion logic)
+        console.log(`📊 Processing linked issue #${linkedIssueNumber} for ingestion`);
       }
       
       commentBody = `🎉 Thanks for opening this pull request, @${author}!
 
 • Linked issue: **${issueRef}**
-• 🪙 **Stake deducted:** ${stakeAmt} coins.
-• 💰 **Remaining balance:** ${user.coins} coins.
+• 🪙 **Stake deducted:** ${stakeAmt} coins
+• 💰 **Remaining balance:** ${user.coins} coins
 • 🎉 **XP awarded:** +${xpReward} XP (Total: ${user.xp})
-• 🏆 **Current rank:** ${user.rank}`;
+• 🏆 **Current rank:** ${user.rank}
+
+Your stake has been successfully processed! 🚀`;
     } else {
-      // User exists but has insufficient funds
       console.log(`❌ ${author} doesn't have enough coins (${userCoins}) for stake (${stakeAmt})`);
       commentBody = `❌ Sorry @${author}, you cannot open this PR.
 
 • **Required stake:** ${stakeAmt} coins
 • **Your current coins:** ${userCoins} coins
-• **Insufficient funds:** You need ${stakeAmt - userCoins} more coins.
+• **Insufficient funds:** You need ${stakeAmt - userCoins} more coins
 
 **@maintainers:** Please close this PR as the contributor doesn't have sufficient stake.`;
     }
   } else {
-    // User exists AND this is a regular, non-staked PR
     commentBody = `🎉 Thanks for opening this pull request, @${author}! This is a non-staked contribution.
 
 • 🏆 **Current rank:** ${user.rank}
@@ -222,16 +263,156 @@ Thanks for your interest in contributing! 🚀`;
 Keep up the great work! 🚀`;
   }
 
-  /* ── 4. Post the comment to the PR ───────────────────────────── */
+  /* ── 5. Post the initial comment to the PR ─────────────────────── */
   try {
     const comment = await postIssueComment(owner, repo, prNumber, commentBody);
-    console.log(`✅ Posted comment: ${commentBody.substring(0, 100)}...`);
-    res.status(201).json({ html_url: comment.html_url });
+    console.log(`✅ Posted initial comment: ${commentBody.substring(0, 100)}...`);
+    
+    /* ── 6. Send immediate confirmation to frontend ──────────────── */
+    // Check wallet for response - support both fields
+    const walletConnected = user ? 
+      ((user.walletAddress && user.walletAddress.trim() !== "") || 
+       (user.publicAddress && user.publicAddress.trim() !== "")) : false;
+
+    const frontendResponse = {
+      success: true,
+      html_url: comment.html_url,
+      pr_tracking_id: prTrackingRecord?._id,
+      wallet_check_scheduled: true,
+      check_delay_seconds: 90,
+      user_found: !!user,
+      wallet_connected: walletConnected,
+      stake_amount: stakeAmt,
+      linked_issue: linkedIssueNumber,
+      user_stats: user ? {
+        coins: user.coins,
+        xp: user.xp,
+        rank: user.rank,
+        wallet_address: user.walletAddress || user.publicAddress || null
+      } : null,
+      pr_status: prTrackingRecord?.status || 'pending',
+      created_at: new Date().toISOString()
+    };
+
+    // Send response immediately to frontend
+    res.status(201).json(frontendResponse);
+    
+    /* ── 7. Schedule async wallet verification check ─────────────── */
+    console.log(`⏰ Scheduling wallet verification check for @${author} in 90 seconds...`);
+    
+    setTimeout(async () => {
+      try {
+        console.log(`⏰ [${new Date().toISOString()}] Running scheduled wallet check for @${author}...`);
+        
+        const currentUser = await User.findOne({ githubUsername: author });
+        
+        let walletCommentBody: string;
+        let newStatus = 'wallet_pending';
+
+        if (currentUser) {
+          // 🚀 FIXED: Check both walletAddress AND publicAddress
+          const hasWallet = (currentUser.walletAddress && 
+                            currentUser.walletAddress.trim() !== "" && 
+                            currentUser.walletAddress !== null) ||
+                           (currentUser.publicAddress && 
+                            currentUser.publicAddress.trim() !== "" && 
+                            currentUser.publicAddress !== null);
+
+          if (hasWallet) {
+            // Use whichever address is available
+            const walletAddr = currentUser.walletAddress || currentUser.publicAddress;
+            const shortAddress = `${walletAddr!.slice(0, 6)}...${walletAddr!.slice(-4)}`;
+            
+            walletCommentBody = `✅ **Wallet Connection Verified!**
+
+🎉 @${author} has successfully connected their wallet!
+
+📊 **Wallet Details:**
+• **Address:** \`${shortAddress}\`
+• **Balance:** ${currentUser.coins || 0} coins
+• **XP:** ${currentUser.xp || 0}
+• **Rank:** ${currentUser.rank}
+
+You're all set to participate in staked contributions! 🚀`;
+
+            // Update verification status and sync wallet fields
+            currentUser.isWalletVerified = true;
+            
+            // Sync wallet fields - copy publicAddress to walletAddress if missing
+            if (!currentUser.walletAddress && currentUser.publicAddress) {
+              currentUser.walletAddress = currentUser.publicAddress;
+              console.log(`🔄 Synced publicAddress to walletAddress for ${author}`);
+            }
+            
+            await currentUser.save();
+            newStatus = 'wallet_verified';
+            
+          } else if (currentUser.role === "contributor") {
+            const signupUrl = stakeAmt > 0 && linkedIssueNumber 
+              ? `${websiteUrl}?owner=${owner}&repo=${repo}&issue=${linkedIssueNumber}`
+              : websiteUrl;
+            
+            walletCommentBody = `⏰ **Wallet Connection Pending**
+
+Hey @${author}, we found your account but you haven't connected your wallet yet.
+
+🔗 **Next Steps:**
+1. **[Connect your wallet here](${signupUrl})**
+2. Complete your wallet setup
+3. Start earning rewards!
+
+⚠️ **Note:** Without a connected wallet, you won't be able to stake on issues or receive rewards.`;
+            newStatus = 'wallet_pending';
+          } else {
+            console.log(`⏩ Skipping wallet check for @${author} - not a contributor role`);
+            return;
+          }
+        } else {
+          walletCommentBody = `❌ **Account Setup Incomplete**
+
+@${author}, we still haven't found your account in our system.
+
+🔗 **Please complete setup:**
+1. **[Create account & connect wallet](${websiteUrl})**
+2. Complete the onboarding process
+3. Return to start contributing!
+
+Need help? Contact our support team.`;
+          newStatus = 'pending';
+        }
+
+        // Update PR tracking record
+        if (prTrackingRecord) {
+          await PRTracking.findByIdAndUpdate(prTrackingRecord._id, { 
+            status: newStatus,
+            lastChecked: new Date()
+          });
+        }
+
+        // Post the wallet verification comment
+        await postIssueComment(owner, repo, prNumber, walletCommentBody);
+        console.log(`✅ Posted wallet verification comment for @${author}`);
+        
+      } catch (error) {
+        console.error(`❌ Scheduled wallet check failed for @${author}:`, error);
+        
+        // Update PR tracking record with error
+        if (prTrackingRecord) {
+          try {
+            await PRTracking.findByIdAndUpdate(prTrackingRecord._id, { 
+              status: 'error',
+              lastChecked: new Date()
+            });
+          } catch (updateError) {
+            console.error(`❌ Failed to update PR tracking record:`, updateError);
+          }
+        }
+      }
+    }, 90000); // 90 seconds
+
   } catch (err: any) {
     console.error("❌ Failed to post PR comment:", err);
-    res
-      .status(502)
-      .json({ error: err.message ?? "GitHub request failed" });
+    res.status(502).json({ error: err.message || "GitHub request failed" });
   }
 };
 
@@ -420,6 +601,146 @@ Keep up the excellent work! 🚀`;
     console.error("❌ Failed to process bonus XP:", err);
     res.status(502).json({ 
       error: err.message ?? "Failed to process bonus XP"
+    });
+  }
+};
+
+export const stakeComment = async (req: Request, res: Response) => {
+  try {
+    const { prNumber, user, owner, repo } = req.body;
+
+    if (!prNumber || !user || !owner || !repo) {
+      return res.status(400).json({
+        success: false,
+        message: "prNumber, user, owner, and repo are required"
+      });
+    }
+
+    const commentBody = `User @${user} has staked money on PR Mentioned in the PR Description. Thank you!`;
+
+    const commentResponse = await postPullRequestComment(
+      owner,
+      repo,
+      prNumber,
+      commentBody
+    );
+
+    res.json({
+      success: true,
+      message: "Comment posted successfully",
+      commentUrl: commentResponse.html_url
+    });
+  } catch (error: any) {
+    console.error("Error posting stake comment:", error);
+    res.status(500).json({
+      success: false,
+      message: error.message || "Failed to post comment"
+    });
+  }
+};
+
+export const xpAwardComment = async (req: Request, res: Response) => {
+  try {
+    const { 
+      prNumber, 
+      targetUser, 
+      awardedBy, 
+      xpPoints, 
+      owner, 
+      repo,
+    } = req.body;
+
+    if (!prNumber || !targetUser || !awardedBy || !xpPoints || !owner || !repo) {
+      return res.status(400).json({
+        success: false,
+        message: "prNumber, targetUser, awardedBy, xpPoints, owner, and repo are required"
+      });
+    }
+
+    const commentBody = `🎉 **XP Awarded!** 🎉
+
+@${targetUser} has been awarded **${xpPoints} XP** by @${awardedBy} for their contribution to this PR!
+
+**Transaction Details:**
+- XP Points: ${xpPoints}
+- Recorded on: Hedera Testnet
+
+This XP has been permanently recorded on the Hedera blockchain and HCS-2 consensus service.
+
+Thank you for your valuable contribution! 🚀`;
+
+    const commentResponse = await postPullRequestComment(
+      owner,
+      repo,
+      prNumber,
+      commentBody
+    );
+
+    res.json({
+      success: true,
+      message: "XP award comment posted successfully",
+      commentUrl: commentResponse.html_url,
+      commentId: commentResponse.id
+    });
+  } catch (error: any) {
+    console.error("Error posting XP award comment:", error);
+    res.status(500).json({
+      success: false,
+      message: error.message || "Failed to post XP award comment"
+    });
+  }
+};
+
+export const bountyAwardComment = async (req: Request, res: Response) => {
+  try {
+    const { 
+      prNumber, 
+      targetUser, 
+      awardedBy, 
+      bountyAmount, 
+      owner, 
+      repo,
+      transferTxHash
+    } = req.body;
+
+    if (!prNumber || !targetUser || !awardedBy || !bountyAmount || !owner || !repo) {
+      return res.status(400).json({
+        success: false,
+        message: "prNumber, targetUser, awardedBy, bountyAmount, owner, and repo are required"
+      });
+    }
+
+    const commentBody = `💰 **Bounty Paid!** 💰
+
+@${targetUser} has been paid **${bountyAmount} HBAR** bounty by @${awardedBy} for their contribution to this PR!
+
+**Payment Details:**
+- Amount: ${bountyAmount} HBAR
+- Network: Hedera Testnet
+${transferTxHash ? `- Transaction Hash: \`${transferTxHash}\`` : ''}
+
+This bounty payment has been permanently recorded on the Hedera blockchain.
+
+Thank you for your valuable contribution! 🚀`;
+
+    const commentResponse = await postPullRequestComment(
+      owner,
+      repo,
+      prNumber,
+      commentBody
+    );
+
+    res.json({
+      success: true,
+      message: "Bounty payment comment posted successfully",
+      commentUrl: commentResponse.html_url,
+      commentId: commentResponse.id
+    });
+  } catch (error: any) {
+    console.error("Error posting bounty comment:", error);
+    res.status(500).json({
+      success: false,
+      message: error.message || "Failed to post bounty comment"
     });
   }
 };

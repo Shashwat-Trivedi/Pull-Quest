@@ -53,10 +53,9 @@ app.get("/health", (_req: Request, res: Response) => {
 
 app.use('/api/comment', commentRoute);
 app.use('/api/chatgpt', GptRoute);
-app.use('/api', AiReview )
 app.use('/api/github', AiReview )
 app.use('/api/hedera', Hedera)
-// 404 handler (must come after all other routes)
+
 app.use((_req: Request, res: Response) => {
   res.status(404).json({
     error: "Route not found",
@@ -102,3 +101,4 @@ connectDB()
 
 // ─── Serverless export for platforms like Vercel ───────────────────────
 export default app;
+
